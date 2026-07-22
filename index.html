@@ -24,6 +24,8 @@
 <button class="navbtn" data-target="training">Training Command Center</button>
 <button class="navbtn" data-target="kpi">KPI Target Entry</button>
 <button class="navbtn" data-target="qcp">QCP Audit</button>
+<button class="navbtn" data-target="process">Process Standardization</button>
+<button class="navbtn" data-target="problems">Problem Solving Dashboard</button>
     </div>
   </div>
   <div class="frame-wrap">
@@ -1247,7 +1249,7 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
           </div>
           <div>
             <label>Department <span class="req">*</span></label>
-            <select id="ic-dept">
+            <select id="ic-dept" onchange="refreshIcCardNoPreview()">
               <option value="" selected disabled>Select…</option>
               <option>OPEX</option>
               <option>Maintenance</option>
@@ -1340,7 +1342,7 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
           </div>
           <div>
             <label>Department <span class="req">*</span></label>
-            <select id="ps-dept">
+            <select id="ps-dept" onchange="refreshPcCardNoPreview()">
               <option value="" selected disabled>Select…</option>
               <option>OPEX</option>
               <option>Maintenance</option>
@@ -1411,7 +1413,7 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
         <div class="stat-card"><div class="n" id="sv-statCount">0</div><div class="l">Entries logged</div></div>
         <div class="stat-card ic"><div class="n" id="sv-statIC">0</div><div class="l">Improvement Cards (IC)</div></div>
         <div class="stat-card pc"><div class="n" id="sv-statPC">0</div><div class="l">Problem Solving Cards (PC)</div></div>
-        <div class="stat-card"><div class="n" id="sv-statSection">—</div><div class="l">Top section</div></div>
+        <div class="stat-card"><div class="n" id="sv-statSection">—</div><div class="l">Top department</div></div>
       </div>
 
       <div class="cat-stat-row" id="sv-catStats"></div>
@@ -1423,7 +1425,7 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
 
       <div class="panel">
         <h2><span class="idx">NEW</span> Log an entry</h2>
-        <div class="desc">Choose Source and Card No first — Section, Benefit, Created and Ongoing dates auto-fill.</div>
+        <div class="desc">Choose Source and Card No first — Department, Benefit, Created and Ongoing dates auto-fill.</div>
 
         <label>Source</label>
         <select id="sv-source" onchange="onSourceChange('sv')">
@@ -1434,15 +1436,8 @@ document.getElementById("submitBtn").addEventListener("click", async () => {
         <label>Card No <span class="req">*</span></label>
         <select id="sv-cardno-select" onchange="onCardNoSelect('sv')"></select>
 
-        <label>Section</label>
-        <select id="sv-section">
-          <option>OPEX</option>
-          <option>Maintenance</option>
-          <option>Production</option>
-          <option>Civil</option>
-          <option>Sustainability</option>
-          <option>Other</option>
-        </select>
+        <label>Department</label>
+        <input id="sv-section" disabled placeholder="Select a card above" />
 
         <label>Benefit of Development</label>
         <textarea id="sv-benefit" placeholder="Expected time/cost/safety benefit…"></textarea>
@@ -1608,12 +1603,22 @@ function switchView(v){
    ============================================================ */
 function nextCardNo(pool, prefix){
   let max = 0;
-  const re = new RegExp('^'+prefix+'-(\\d+)$','i');
+  // No trailing $ anchor — card numbers now look like "ICO-05 — VRM", so we
+  // only need to match the "PREFIX-NN" lead-in to find the next sequence number.
+  const re = new RegExp('^'+prefix+'-(\\d+)','i');
   pool.forEach(c => { const m = re.exec(c.cardno); if(m) max = Math.max(max, parseInt(m[1],10)); });
   return prefix + '-' + String(max+1).padStart(2,'0');
 }
-function refreshIcCardNoPreview(){ document.getElementById('ic-cardno').value = nextCardNo(icCards, 'ICO'); }
-function refreshPcCardNoPreview(){ document.getElementById('ps-cardno').value = nextCardNo(pcCards, 'PSC'); }
+function refreshIcCardNoPreview(){
+  const dept = document.getElementById('ic-dept').value;
+  const field = document.getElementById('ic-cardno');
+  field.value = dept ? nextCardNo(icCards, 'ICO') + ' — ' + dept : 'Select a department first';
+}
+function refreshPcCardNoPreview(){
+  const dept = document.getElementById('ps-dept').value;
+  const field = document.getElementById('ps-cardno');
+  field.value = dept ? nextCardNo(pcCards, 'PSC') + ' — ' + dept : 'Select a department first';
+}
 
 /* ============================================================
    IMPROVEMENT CARDS
@@ -1659,7 +1664,7 @@ async function logCard(){
   }
   err.style.display='none';
 
-  const cardno = nextCardNo(icCards, 'ICO');
+  const cardno = nextCardNo(icCards, 'ICO') + ' — ' + dept;
   try{
     await sbFetch(IC_TABLE, { method: 'POST', body: JSON.stringify({
       sbu, card_no: cardno, dept, provider, created_date: created,
@@ -1860,7 +1865,7 @@ async function logPcCard(){
   }
   err.style.display='none';
 
-  const cardno = nextCardNo(pcCards, 'PSC');
+  const cardno = nextCardNo(pcCards, 'PSC') + ' — ' + dept;
   try{
     await sbFetch(PC_TABLE, { method: 'POST', body: JSON.stringify({
       sbu, card_no: cardno, dept, provider, created_date: created,
@@ -2133,10 +2138,14 @@ function onCardNoSelect(key){
   const ongEl = document.getElementById(key+'-ongoing');
 
   if(!c){
+    secEl.value = '';
+    secEl.placeholder = 'Select a card above';
     secEl.disabled = false; benEl.disabled = false; creEl.disabled = false; ongEl.disabled = false;
     return;
   }
-  if([...secEl.options].some(o=>o.value===c.dept)) secEl.value = c.dept;
+  // Department comes straight from Supabase (the card's own dept field) — always
+  // reflects the real value, whatever it is, instead of only matching a fixed list.
+  secEl.value = c.dept || '';
   benEl.value = c.benefit || '';
   creEl.value = c.created;
   ongEl.value = c.acceptedDate || '';
@@ -2153,7 +2162,8 @@ function clearLedgerForm(){
     if(cat.unitMode === 'text') document.getElementById('sv-uom-'+cat.key).value = cat.unitDefault;
   });
   document.getElementById('sv-source').value='IC';
-  document.getElementById('sv-section').value='OPEX';
+  document.getElementById('sv-section').value='';
+  document.getElementById('sv-section').placeholder='Select a card above';
   document.getElementById('sv-section').disabled=false;
   document.getElementById('sv-benefit').disabled=false;
   document.getElementById('sv-created').disabled=false;
@@ -2532,8 +2542,28 @@ function render(){
   .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
   .btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1300;}
   .btn.confirm{background:var(--good);border-color:var(--good);color:#05230f;}
+  .btn.small{padding:8px 14px;font-size:12.5px;}
   .btn-row{margin-top:18px;display:flex;justify-content:flex-end;gap:10px;align-items:center;flex-wrap:wrap;}
   .hint{font-size:12.5px;color:var(--muted);margin-right:auto;}
+
+  /* ---------- Completed-project actuals block ---------- */
+  .actuals-block{
+    margin-top:12px;padding-top:12px;
+    border-top:1px dashed var(--panel-border);
+  }
+  .actuals-title{
+    display:flex;align-items:center;gap:7px;
+    font-size:12px;font-weight:700;color:var(--good);
+    text-transform:uppercase;letter-spacing:.05em;
+    margin-bottom:10px;
+  }
+  .actuals-title::before{
+    content:"✓";
+    width:16px;height:16px;border-radius:50%;
+    background:var(--good-soft);color:var(--good);
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:10.5px;
+  }
 
   /* ---------- Setup dropdown row ---------- */
   .setup-selects{
@@ -2962,7 +2992,10 @@ function render(){
       budget: row.estimated_budget === null || row.estimated_budget === undefined ? '' : row.estimated_budget,
       status: row.status || 'pending',
       milestones: Array.isArray(row.milestones) ? row.milestones : [],
-      progress: row.progress === null || row.progress === undefined ? 0 : Number(row.progress)
+      progress: row.progress === null || row.progress === undefined ? 0 : Number(row.progress),
+      actualSavings: row.actual_savings === null || row.actual_savings === undefined ? '' : row.actual_savings,
+      actualBudget: row.actual_budget === null || row.actual_budget === undefined ? '' : row.actual_budget,
+      actualDetails: row.actual_details || ''
     };
   }
 
@@ -2985,7 +3018,10 @@ function render(){
       estimated_budget: project.budget === '' || project.budget === null || project.budget === undefined ? null : Number(project.budget),
       status: project.status || 'pending',
       milestones: project.milestones || [],
-      progress: computeProgress(project)
+      progress: computeProgress(project),
+      actual_savings: project.actualSavings === '' || project.actualSavings === null || project.actualSavings === undefined ? null : Number(project.actualSavings),
+      actual_budget: project.actualBudget === '' || project.actualBudget === null || project.actualBudget === undefined ? null : Number(project.actualBudget),
+      actual_details: project.actualDetails || null
     };
   }
 
@@ -3226,6 +3262,7 @@ function render(){
       .map(r => ({id:r.id, name:r.name.trim(), weight:Number(r.weight)||0, done:!!r.done}));
     project.milestones = cleanRows;
     project.status = 'finalized';
+    if(computeProjectProgress(project) >= 100) expandedIds.add(project.id);
     clearTimeout(syncDebounceTimer);
     const finalizeBtn = $('finalizeBtn');
     finalizeBtn.disabled = true;
@@ -3303,6 +3340,7 @@ function render(){
     const m = project.milestones.find(x=>x.id === milestoneId);
     if(!m) return;
     m.done = !m.done;
+    if(computeProjectProgress(project) >= 100) expandedIds.add(projectId);
     renderLedger();
 
     // keep Section 02 editor in sync if this same project is currently loaded there
@@ -3313,6 +3351,46 @@ function render(){
     }
     try{ await updateProjectDb(project); }
     catch(e){ console.error(e); toast('Could not save this change.'); }
+  }
+
+  async function saveActualsForProject(projectId){
+    const project = projects.find(p=>p.id === projectId);
+    if(!project) return;
+    const savingsInput = document.querySelector(`.actual-savings-input[data-project="${projectId}"]`);
+    const budgetInput = document.querySelector(`.actual-budget-input[data-project="${projectId}"]`);
+    const detailsInput = document.querySelector(`.actual-details-input[data-project="${projectId}"]`);
+    const hintEl = document.getElementById('actualsHint-'+projectId);
+    const btn = document.querySelector(`.actuals-save-btn[data-project="${projectId}"]`);
+
+    const actualSavings = savingsInput.value === '' ? null : Number(savingsInput.value);
+    const actualBudget = budgetInput.value === '' ? null : Number(budgetInput.value);
+    const actualDetails = detailsInput.value.trim() || null;
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    try{
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?id=eq.${projectId}`, {
+        method: 'PATCH',
+        headers: apiHeaders({ 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ actual_savings: actualSavings, actual_budget: actualBudget, actual_details: actualDetails })
+      });
+      if(!res.ok){
+        const text = await res.text();
+        throw new Error('Save failed: ' + res.status + ' ' + text);
+      }
+      project.actualSavings = actualSavings === null ? '' : actualSavings;
+      project.actualBudget = actualBudget === null ? '' : actualBudget;
+      project.actualDetails = actualDetails || '';
+      if(hintEl){ hintEl.textContent = 'Saved.'; hintEl.style.color = 'var(--good)'; }
+      toast('Actuals saved for "' + project.name + '".');
+    }catch(e){
+      console.error(e);
+      if(hintEl){ hintEl.textContent = 'Could not save — try again.'; hintEl.style.color = 'var(--bad)'; }
+      toast('Could not save actuals.');
+    }finally{
+      btn.disabled = false;
+      btn.textContent = 'Save Actuals';
+    }
   }
 
   function renderLedger(){
@@ -3384,6 +3462,29 @@ function render(){
                   <button type="button" class="toggle lm-toggle" data-project="${p.id}" data-milestone="${m.id}" data-done="${m.done}">${m.done ? 'YES' : 'NO'}</button>
                 </div>`).join('')}
             </div>
+            ${progress !== null && progress >= 100 ? `
+              <div class="actuals-block">
+                <div class="actuals-title">Completed — Actuals</div>
+                <div class="field-grid">
+                  <div class="field">
+                    <label>Actual Savings</label>
+                    <input type="number" step="0.01" class="actual-savings-input" data-project="${p.id}" value="${p.actualSavings===''?'':p.actualSavings}" placeholder="e.g. 42000">
+                  </div>
+                  <div class="field">
+                    <label>Actual Budget</label>
+                    <input type="number" step="0.01" class="actual-budget-input" data-project="${p.id}" value="${p.actualBudget===''?'':p.actualBudget}" placeholder="e.g. 148000">
+                  </div>
+                  <div class="field full">
+                    <label>Actual Details</label>
+                    <textarea class="actual-details-input" data-project="${p.id}" placeholder="What actually happened — final figures, notes, learnings…">${escapeHtml(p.actualDetails||'')}</textarea>
+                  </div>
+                </div>
+                <div class="btn-row">
+                  <span class="hint" id="actualsHint-${p.id}"></span>
+                  <button type="button" class="btn small confirm actuals-save-btn" data-project="${p.id}">Save Actuals</button>
+                </div>
+              </div>
+            ` : ''}
           </td>
         </tr>` : '';
       return mainRow + subRow;
@@ -3404,6 +3505,9 @@ function render(){
       btn.addEventListener('click', ()=>{
         toggleMilestoneDoneFromLedger(btn.dataset.project, btn.dataset.milestone);
       });
+    });
+    body.querySelectorAll('.actuals-save-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=> saveActualsForProject(btn.dataset.project));
     });
     body.querySelectorAll('.del-btn').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -3432,8 +3536,18 @@ function render(){
   }
 
   // ---------- INIT ----------
+  function computeProjectProgress(p){
+    const hasMilestones = p.milestones && p.milestones.length > 0;
+    return hasMilestones
+      ? p.milestones.filter(m=>m.done).reduce((s,m)=>s+m.weight,0)
+      : (p.progress ? p.progress : null);
+  }
+
   (async function init(){
     await loadProjects();
+    // Auto-expand already-completed projects so their Actuals section is
+    // visible immediately, instead of being hidden behind the collapsed row.
+    projects.forEach(p => { if(computeProjectProgress(p) >= 100) expandedIds.add(p.id); });
     refreshSetupDropdowns();
     loadMilestoneEditor(null);
     renderLedger();
@@ -5022,6 +5136,2158 @@ submitBtn.addEventListener('click', async ()=>{
 
 loadEntries();
 %%ENDSCRIPT%%>
+</body>
+</html>
+</script>
+
+<script type="text/plain" id="tpl-process"><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Process Standardization Index</title>
+<style>
+  :root{
+    --blue:#1a56c4; --blue-dark:#0e3a8f;
+    --ink:#1c2430; --sub:#5b6472; --line:#e2e5ea;
+    --bg:#f3f4f7; --card:#ffffff;
+    --ok:#1a7f4a; --ok-bg:#e6f5ec;
+    --fail:#c23b3b; --fail-bg:#fbe9e9;
+    --warn:#b5750f; --warn-bg:#fbf1e0;
+    --prog:#1a56c4; --prog-bg:#e8eefc;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink);}
+  .topbar{background:var(--blue-dark);color:#fff;padding:14px 28px;font-size:15px;font-weight:600;letter-spacing:.2px;}
+  .wrap{max-width:900px;margin:32px auto 60px;padding:0 16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px 32px;box-shadow:0 1px 3px rgba(20,30,50,.06);margin-bottom:20px;}
+  h1{font-size:20px;margin:0 0 4px;color:var(--blue-dark);}
+  .subtitle{color:var(--sub);font-size:13px;margin:0 0 22px;}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
+  input,select,textarea{width:100%;padding:9px 11px;border:1px solid #cfd4dc;border-radius:8px;font-size:14px;background:#fff;color:var(--ink);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,86,196,.12);}
+  textarea{resize:vertical;min-height:80px;}
+  .full{grid-column:1/-1;}
+  button{padding:11px 18px;background:var(--blue);color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;}
+  button:hover{background:var(--blue-dark);}
+  button:disabled{background:#b9c3d6;cursor:not-allowed;}
+  .btn-secondary{background:transparent;color:var(--blue);border:1px solid #cfd4dc;}
+  .btn-secondary:hover{background:#eef1f6;}
+  .btn-finalize{background:#fff;color:var(--ok);border:1px solid #bfe4cd;}
+  .btn-finalize:hover{background:var(--ok-bg);}
+  .btn-finalize.active{background:var(--ok);color:#fff;}
+  .full-btn{width:100%;}
+  .summary-box{display:none;margin-top:14px;}
+  .summary-box.show{display:block;}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:13px;display:none;}
+  .msg.show{display:block;}
+  .msg.ok{background:var(--ok-bg);color:var(--ok);}
+  .msg.error{background:var(--fail-bg);color:var(--fail);}
+
+  /* month progress tracker */
+  .tracker{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  .tracker-stat{display:flex;flex-direction:column;}
+  .tracker-num{font-size:26px;font-weight:700;color:var(--blue-dark);}
+  .tracker-label{font-size:12px;color:var(--sub);}
+  .tracker-bar-wrap{flex:1;min-width:160px;}
+  .tracker-bar-bg{height:10px;background:#e8eaee;border-radius:6px;overflow:hidden;}
+  .tracker-bar-fill{height:100%;background:var(--ok);border-radius:6px;transition:width .3s;}
+  .tracker-bar-fill.behind{background:var(--warn);}
+  .tracker-note{font-size:12px;color:var(--sub);margin-top:5px;}
+  .month-select{width:auto;}
+
+  /* filters */
+  .filter-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
+  .filter-actions{display:flex;gap:10px;margin-top:4px;}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th,td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;}
+  th{color:var(--sub);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;}
+  .pill{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;}
+  .pill.not-started{background:#f1f2f5;color:var(--sub);}
+  .pill.in-progress{background:var(--prog-bg);color:var(--prog);}
+  .pill.completed{background:var(--ok-bg);color:var(--ok);}
+  .pill.final{background:#efe7fb;color:#6a3fb5;}
+  .empty{color:#9aa1ab;font-size:13px;padding:14px 0;text-align:center;}
+  .del-btn{padding:4px 10px;background:transparent;color:var(--fail);border:1px solid #f2c3c3;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;}
+  .del-btn:hover{background:var(--fail-bg);}
+  .status-select{font-size:12px;padding:5px 7px;}
+  .fin-btn-sm{font-size:11px;padding:5px 10px;border-radius:6px;}
+  .summary-cell{max-width:220px;font-size:11.5px;color:var(--sub);}
+  .row-actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .name-row{display:flex;gap:8px;margin-bottom:8px;}
+  .name-row input{flex:1;}
+  .name-row .remove-name-btn{padding:0 12px;background:transparent;color:var(--fail);border:1px solid #f2c3c3;border-radius:8px;font-size:16px;line-height:1;cursor:pointer;}
+  .name-row .remove-name-btn:hover{background:var(--fail-bg);}
+</style>
+</head>
+<body>
+
+<div class="topbar">Lean Manufacturing &nbsp;/&nbsp; Process Standardization Index</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <h1>Monthly progress</h1>
+    <p class="subtitle">Target: minimum 2 process standardization projects completed per month.</p>
+    <div class="tracker">
+      <select id="trackerMonth" class="month-select"></select>
+      <div class="tracker-stat">
+        <div class="tracker-num" id="trackerCount">0 / 2</div>
+        <div class="tracker-label">Completed this month</div>
+      </div>
+      <div class="tracker-bar-wrap">
+        <div class="tracker-bar-bg"><div class="tracker-bar-fill" id="trackerBar" style="width:0%"></div></div>
+        <div class="tracker-note" id="trackerNote">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h1>New project entry</h1>
+    <p class="subtitle">Register a new process standardization project.</p>
+
+    <div class="row">
+      <div class="field">
+        <label>Start date</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="field">
+        <label>SBU</label>
+        <select id="sbu">
+          <option value="">Select SBU</option>
+          <option>ACCL</option>
+          <option>AIL</option>
+          <option>AAFL</option>
+          <option>AEL(Flour)</option>
+          <option>APFIL</option>
+          <option>HRML</option>
+          <option>MRML</option>
+          <option>FAL</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field full">
+        <label>Project name(s)</label>
+        <div id="projectNameList"></div>
+        <button type="button" id="addNameBtn" class="btn-secondary" style="margin-top:8px;padding:7px 14px;font-size:13px;">+ Add another project name</button>
+      </div>
+    </div>
+
+    <button type="button" id="addBtn" class="full-btn">Add project</button>
+    <div class="msg ok" id="msg">Project added below.</div>
+  </div>
+
+  <div class="card">
+    <h1>Project register</h1>
+
+    <div class="filter-row">
+      <div class="field">
+        <label>SBU</label>
+        <select id="fSbu"><option value="">All</option></select>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="fStatus">
+          <option value="">All</option>
+          <option value="Not Started">Not started</option>
+          <option value="In Progress">In progress</option>
+          <option value="Completed">Completed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>From date</label>
+        <input type="date" id="fFrom">
+      </div>
+      <div class="field">
+        <label>To date</label>
+        <input type="date" id="fTo">
+      </div>
+    </div>
+    <div class="filter-actions" style="margin-bottom:20px;">
+      <button id="applyFilter">Apply filters</button>
+      <button id="resetFilter" type="button" class="btn-secondary">Reset</button>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th>Start date</th><th>SBU</th><th>Project name</th><th>Status</th><th>Summary</th><th></th>
+      </tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <p class="empty" id="emptyMsg">No entries yet.</p>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js">%%ENDSCRIPT%%>
+<script>
+const SUPABASE_URL = "https://vpwbcuxwxkqvauffqooj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: {
+    // Some sandboxed/preview environments instrument window.fetch and try to
+    // postMessage the request details to a parent frame for logging. A native
+    // Headers object can't be structured-cloned, which throws DataCloneError
+    // and silently breaks the request. Passing headers as a plain object avoids it.
+    fetch: (url, options = {}) => {
+      const plainHeaders = {};
+      if(options.headers){
+        if(options.headers instanceof Headers){
+          options.headers.forEach((v,k)=> plainHeaders[k] = v);
+        } else {
+          Object.assign(plainHeaders, options.headers);
+        }
+      }
+      return window.fetch(url, { ...options, headers: plainHeaders });
+    }
+  }
+});
+const TABLE = "accl_process_standardization";
+const MONTHLY_TARGET = 2;
+
+const $ = id => document.getElementById(id);
+const startDateEl=$('startDate'), sbuEl=$('sbu'),
+      projectNameList=$('projectNameList'), addNameBtn=$('addNameBtn'),
+      addBtn=$('addBtn'), msg=$('msg'), tableBody=$('tableBody'), emptyMsg=$('emptyMsg');
+const fSbu=$('fSbu'), fStatus=$('fStatus'), fFrom=$('fFrom'), fTo=$('fTo'),
+      applyFilterBtn=$('applyFilter'), resetFilterBtn=$('resetFilter');
+const trackerMonth=$('trackerMonth'), trackerCount=$('trackerCount'),
+      trackerBar=$('trackerBar'), trackerNote=$('trackerNote');
+
+function showMessage(text, type='ok'){
+  msg.textContent = text;
+  msg.className = 'msg show ' + type;
+  clearTimeout(showMessage._t);
+  showMessage._t = setTimeout(()=> msg.classList.remove('show'), type==='error' ? 4000 : 2500);
+}
+
+function addNameRow(){
+  const row = document.createElement('div');
+  row.className = 'name-row';
+  row.innerHTML = `<input type="text" class="project-name-input" placeholder="e.g. SOP of VRM">
+    <button type="button" class="remove-name-btn" title="Remove">&times;</button>`;
+  row.querySelector('.remove-name-btn').addEventListener('click', ()=>{
+    if(projectNameList.children.length > 1){
+      row.remove();
+    } else {
+      row.querySelector('input').value = '';
+    }
+  });
+  projectNameList.appendChild(row);
+}
+addNameRow(); // start with one row
+addNameBtn.addEventListener('click', addNameRow);
+
+const SBU_OPTIONS = ["ACCL","AIL","AAFL","AEL(Flour)","APFIL","HRML","MRML","FAL"];
+fSbu.innerHTML = '<option value="">All</option>' + SBU_OPTIONS.map(s=>`<option>${s}</option>`).join('');
+
+function statusClass(status){
+  if(status === 'Completed') return 'completed';
+  if(status === 'In Progress') return 'in-progress';
+  return 'not-started';
+}
+
+function monthKey(dateStr){
+  if(!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+function monthLabel(key){
+  const [y,m] = key.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleString('en-US',{month:'long', year:'numeric'});
+}
+
+function populateMonthOptions(){
+  const now = new Date();
+  const opts = [];
+  for(let i=0;i<12;i++){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    opts.push({key, label: monthLabel(key)});
+  }
+  trackerMonth.innerHTML = opts.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
+}
+populateMonthOptions();
+
+async function refreshTracker(){
+  const key = trackerMonth.value;
+  const [y,m] = key.split('-').map(Number);
+  const from = `${key}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const to = `${key}-${String(lastDay).padStart(2,'0')}`;
+
+  const { data, error } = await sb.from(TABLE).select('status').gte('start_date', from).lte('start_date', to);
+  if(error){ trackerNote.textContent = 'Could not load: ' + error.message; return; }
+
+  const completed = data.filter(r => r.status === 'Completed').length;
+  trackerCount.textContent = `${completed} / ${MONTHLY_TARGET}`;
+  const pct = Math.min(100, Math.round((completed / MONTHLY_TARGET) * 100));
+  trackerBar.style.width = pct + '%';
+  trackerBar.classList.toggle('behind', completed < MONTHLY_TARGET);
+  trackerNote.textContent = completed >= MONTHLY_TARGET
+    ? `Target met for ${monthLabel(key)}.`
+    : `${MONTHLY_TARGET - completed} more project(s) needed to hit target for ${monthLabel(key)}.`;
+}
+trackerMonth.addEventListener('change', refreshTracker);
+
+function buildRow(r){
+  const tr = document.createElement('tr');
+  tr.dataset.id = r.id;
+
+  const summaryCell = r.is_finalized && r.summary
+    ? `<span class="summary-cell">${r.summary}</span>`
+    : `<span class="summary-cell" style="color:#c3c8d1;">—</span>`;
+
+  const finalizeBtnLabel = r.is_finalized ? 'Finalized' : 'Finalize';
+
+  tr.innerHTML = `
+    <td>${r.start_date || '—'}</td>
+    <td>${r.sbu}</td>
+    <td>${r.project_name}</td>
+    <td>
+      <select class="status-select">
+        <option value="Not Started" ${r.status==='Not Started'?'selected':''}>Not started</option>
+        <option value="In Progress" ${r.status==='In Progress'?'selected':''}>In progress</option>
+        <option value="Completed" ${r.status==='Completed'?'selected':''}>Completed</option>
+      </select>
+    </td>
+    <td>${summaryCell}</td>
+    <td>
+      <div class="row-actions">
+        <button type="button" class="fin-btn-sm btn-finalize ${r.is_finalized?'active':''}">${finalizeBtnLabel}</button>
+        <button type="button" class="del-btn">Delete</button>
+      </div>
+    </td>`;
+
+  // status change -> update db
+  tr.querySelector('.status-select').addEventListener('change', async (e)=>{
+    const newStatus = e.target.value;
+    const { error } = await sb.from(TABLE).update({status:newStatus}).eq('id', r.id);
+    if(error){ showMessage('Could not update status: ' + error.message, 'error'); return; }
+    r.status = newStatus;
+    refreshTracker();
+  });
+
+  // finalize -> reveal inline textarea to capture summary, save on blur/enter
+  tr.querySelector('.fin-btn-sm').addEventListener('click', ()=>{
+    if(tr.querySelector('.inline-summary-row')) return; // already open
+    const box = document.createElement('tr');
+    box.className = 'inline-summary-row';
+    box.innerHTML = `<td colspan="6">
+        <div class="summary-box show">
+          <label style="font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;display:block;margin-bottom:6px;">
+            Project summary
+          </label>
+          <textarea placeholder="Summarize what was done, outcome, and any follow-up...">${r.summary || ''}</textarea>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button type="button" class="save-summary-btn" style="padding:8px 16px;">Save summary & finalize</button>
+            <button type="button" class="cancel-summary-btn btn-secondary" style="padding:8px 16px;">Cancel</button>
+          </div>
+        </div>
+      </td>`;
+    tr.after(box);
+
+    box.querySelector('.cancel-summary-btn').addEventListener('click', ()=> box.remove());
+    box.querySelector('.save-summary-btn').addEventListener('click', async ()=>{
+      const summaryText = box.querySelector('textarea').value.trim();
+      if(!summaryText){ showMessage('Write a summary before finalizing.', 'error'); return; }
+      const { error } = await sb.from(TABLE).update({ is_finalized:true, summary:summaryText }).eq('id', r.id);
+      if(error){ showMessage('Could not save summary: ' + error.message, 'error'); return; }
+      r.is_finalized = true;
+      r.summary = summaryText;
+      box.remove();
+      loadEntries();
+    });
+  });
+
+  tr.querySelector('.del-btn').addEventListener('click', async (e)=>{
+    const btn = e.currentTarget;
+    if(btn.dataset.confirming !== 'yes'){
+      btn.dataset.confirming = 'yes';
+      btn.textContent = 'Click again to confirm';
+      setTimeout(()=>{ btn.dataset.confirming=''; btn.textContent='Delete'; }, 3000);
+      return;
+    }
+    btn.textContent = 'Deleting…';
+    const { error } = await sb.from(TABLE).delete().eq('id', r.id);
+    if(error){ showMessage('Could not delete: ' + error.message, 'error'); btn.textContent='Delete'; btn.dataset.confirming=''; return; }
+    tr.remove();
+    if(!tableBody.children.length) emptyMsg.style.display='block';
+    refreshTracker();
+  });
+
+  return tr;
+}
+
+async function loadEntries(){
+  let query = sb.from(TABLE).select('*').order('start_date', {ascending:false});
+
+  if(fSbu.value) query = query.eq('sbu', fSbu.value);
+  if(fStatus.value) query = query.eq('status', fStatus.value);
+  if(fFrom.value) query = query.gte('start_date', fFrom.value);
+  if(fTo.value) query = query.lte('start_date', fTo.value);
+
+  const { data, error } = await query;
+  if(error){ showMessage('Could not load entries: ' + error.message, 'error'); return; }
+
+  tableBody.innerHTML = '';
+  if(!data.length){ emptyMsg.style.display='block'; return; }
+  emptyMsg.style.display='none';
+  data.forEach(r => tableBody.appendChild(buildRow(r)));
+}
+
+addBtn.addEventListener('click', async ()=>{
+  const names = [...projectNameList.querySelectorAll('.project-name-input')]
+    .map(i => i.value.trim())
+    .filter(v => v.length > 0);
+
+  if(!startDateEl.value || !sbuEl.value || names.length === 0){
+    showMessage('Fill in start date, SBU, and at least one project name.', 'error');
+    return;
+  }
+
+  addBtn.disabled = true;
+  addBtn.textContent = 'Saving…';
+
+  try{
+    const rows = names.map(name => ({
+      start_date: startDateEl.value,
+      sbu: sbuEl.value,
+      project_name: name,
+      status: 'Not Started',
+      is_finalized: false
+    }));
+
+    const { data, error } = await sb.from(TABLE).insert(rows).select();
+
+    if(error){
+      showMessage('Could not save: ' + error.message, 'error');
+      return;
+    }
+
+    showMessage(`${data.length} project${data.length>1?'s':''} added below.`, 'ok');
+
+    // reset form
+    projectNameList.innerHTML = '';
+    addNameRow();
+    sbuEl.value = '';
+    startDateEl.value = '';
+
+    await loadEntries();
+    await refreshTracker();
+  } catch(err){
+    showMessage('Unexpected error: ' + err.message, 'error');
+    console.error(err);
+  } finally{
+    addBtn.disabled = false;
+    addBtn.textContent = 'Add project';
+  }
+});
+
+applyFilterBtn.addEventListener('click', (e)=>{ e.preventDefault(); loadEntries(); });
+resetFilterBtn.addEventListener('click', ()=>{
+  fSbu.value=''; fStatus.value=''; fFrom.value=''; fTo.value='';
+  loadEntries();
+});
+
+refreshTracker();
+loadEntries();
+%%ENDSCRIPT%%>
+</body>
+</html>
+</script>
+
+<script type="text/plain" id="tpl-problems"><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Problem Solving Dashboard</title>
+    <style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary: #d9542e;
+    --dark: #1f2937;
+    --light: #f5f3f0;
+    --border: #d4ccc4;
+    --text: #4b5563;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --critical: #dc2626;
+    --danger: #ef4444;
+}
+
+body {
+    font-family: 'Courier New', monospace;
+    background: linear-gradient(135deg, #f5f3f0 0%, #faf8f5 100%);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.header {
+    background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+    color: white;
+    padding: 40px 20px;
+    border-bottom: 4px solid var(--primary);
+    margin-bottom: 40px;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+}
+
+.header .label {
+    font-size: 0.6em;
+    opacity: 0.8;
+    display: block;
+}
+
+.header .highlight {
+    color: var(--primary);
+}
+
+.subtitle {
+    opacity: 0.9;
+    font-size: 0.95rem;
+}
+
+.tickets-count {
+    text-align: right;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    padding: 15px 25px;
+    border-radius: 8px;
+}
+
+.count {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+.count-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    opacity: 0.8;
+    letter-spacing: 1px;
+}
+
+.form-section,
+.problems-section {
+    background: white;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 30px;
+    margin-bottom: 40px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.section-title {
+    font-size: 1.8rem;
+    font-weight: bold;
+    color: var(--dark);
+    margin-bottom: 25px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border-bottom: 3px solid var(--primary);
+    padding-bottom: 15px;
+}
+
+.form-group {
+    margin-bottom: 25px;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text);
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.form-input {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 1rem;
+    color: var(--dark);
+    transition: border-color 0.3s;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: #fafaf8;
+}
+
+.form-textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.sbu-buttons,
+.priority-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
+}
+
+.priority-buttons {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.sbu-btn,
+.priority-btn {
+    padding: 12px 15px;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    background: white;
+    color: var(--dark);
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    transition: all 0.3s;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+}
+
+.sbu-btn:hover,
+.priority-btn:hover {
+    border-color: var(--primary);
+    background: #faf8f5;
+}
+
+.sbu-btn.active,
+.priority-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.priority-btn.critical.active {
+    background: var(--critical);
+}
+
+.priority-btn.warning.active {
+    background: var(--warning);
+}
+
+.priority-btn.neutral.active {
+    background: #6b7280;
+}
+
+.btn-submit {
+    width: 100%;
+    padding: 15px;
+    background: #1f2937;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.3s;
+}
+
+.btn-submit:hover {
+    background: var(--primary);
+}
+
+.btn-submit:active {
+    transform: scale(0.98);
+}
+
+.btn-submit:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.btn-progress {
+    background: var(--warning);
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    margin-right: 10px;
+    transition: all 0.3s;
+}
+
+.btn-progress:hover {
+    background: #d97706;
+}
+
+.btn-solved {
+    background: var(--success);
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s;
+}
+
+.btn-solved:hover {
+    background: #059669;
+}
+
+.btn-meeting {
+    background:#7c3aed;
+    color:white;
+    padding:10px 20px;
+    border:none;
+    border-radius:4px;
+    cursor:pointer;
+    font-weight:bold;
+    margin-right:10px;
+}
+
+.btn-meeting:hover {
+    background: #6d28d9;
+}
+
+.btn-cancel {
+    background: #e5e7eb;
+    color: var(--dark);
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.btn-cancel:hover {
+    background: #d1d5db;
+}
+
+.btn-delete {
+    background: var(--danger);
+    color: white;
+    padding: 8px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.85rem;
+    transition: all 0.3s;
+    text-transform: uppercase;
+}
+
+.btn-delete:hover {
+    background: #dc2626;
+}
+
+.filter-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 25px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    padding: 8px 15px;
+    border: 2px solid var(--border);
+    border-radius: 20px;
+    background: white;
+    color: var(--dark);
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    font-weight: bold;
+    transition: all 0.3s;
+}
+
+.filter-btn:hover {
+    border-color: var(--primary);
+}
+
+.filter-btn.active {
+    background: var(--dark);
+    color: white;
+    border-color: var(--dark);
+}
+
+.filter-btn .count {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+}
+
+.problems-list {
+    display: grid;
+    gap: 15px;
+}
+
+.problem-card {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    background: white;
+    transition: all 0.3s;
+}
+
+.problem-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 4px 12px rgba(217, 84, 46, 0.1);
+}
+
+.problem-card.solved {
+    background: #f0fdf4;
+    border-color: var(--success);
+}
+
+.problem-card.in-progress {
+    background: #fffbeb;
+    border-color: var(--warning);
+}
+
+.problem-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    gap: 10px;
+}
+
+.problem-meta {
+    flex: 1;
+}
+
+.problem-sbu {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    margin-right: 8px;
+}
+
+.employee-id-badge {
+    display: inline-block;
+    background: #7c3aed;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    margin-right: 8px;
+}
+
+.priority-badge {
+    display: inline-block;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.priority-badge.critical {
+    background: var(--critical);
+}
+
+.priority-badge.warning {
+    background: var(--warning);
+}
+
+.priority-badge.neutral {
+    background: #6b7280;
+}
+
+.problem-title {
+    font-size: 1rem;
+    font-weight: bold;
+    color: var(--dark);
+    margin-bottom: 8px;
+}
+
+.problem-meta-info {
+    font-size: 0.8rem;
+    color: #999;
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.problem-description {
+    color: var(--text);
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.problem-suggested {
+    background: #f9f7f4;
+    padding: 12px;
+    border-left: 3px solid var(--primary);
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.solution-badge {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-badge.solved {
+    background: var(--success);
+    color: white;
+}
+
+.status-badge.in-progress {
+    background: var(--warning);
+    color: white;
+}
+
+.status-badge.open {
+    background: #e5e7eb;
+    color: var(--dark);
+}
+
+.problem-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
+.btn-small {
+    padding: 8px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: bold;
+    transition: all 0.3s;
+    text-transform: uppercase;
+}
+
+.btn-add-solution {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-add-solution:hover {
+    background: #c94620;
+}
+
+.btn-view-solution {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-view-solution:hover {
+    background: #2563eb;
+}
+
+.btn-delete-small {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-delete-small:hover {
+    background: #b91c1c;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #999;
+    font-style: italic;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    animation: fadeIn 0.3s;
+}
+
+.modal.show {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 2px solid var(--border);
+}
+
+.modal-header h3 {
+    font-size: 1.3rem;
+    color: var(--dark);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text);
+}
+
+.modal-close:hover {
+    color: var(--primary);
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-footer {
+    padding: 20px;
+    border-top: 2px solid var(--border);
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.problem-detail {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid var(--border);
+}
+
+.detail-row {
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+}
+
+.detail-label {
+    font-weight: bold;
+    color: var(--text);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    min-width: 100px;
+}
+
+.detail-value {
+    color: var(--dark);
+}
+
+.solution-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 2px solid var(--border);
+}
+
+.solution-section h4 {
+    font-size: 1rem;
+    color: var(--dark);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+
+.solution-text {
+    background: #f9f7f4;
+    padding: 15px;
+    border-radius: 4px;
+    border-left: 3px solid var(--primary);
+    line-height: 1.6;
+}
+
+.error-message {
+    color: #dc2626;
+    font-size: 0.9rem;
+    margin-top: 10px;
+    display: none;
+}
+
+.error-message.show {
+    display: block;
+}
+
+#syncStatus {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: #10b981;
+    color: white;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: bold;
+    z-index: 999;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 768px) {
+    .header {
+        padding: 25px 15px;
+    }
+
+    .header h1 {
+        font-size: 1.8rem;
+    }
+
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .tickets-count {
+        width: 100%;
+        text-align: center;
+        margin-top: 15px;
+    }
+
+    .form-section,
+    .problems-section {
+        padding: 20px;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .sbu-buttons,
+    .priority-buttons {
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 8px;
+    }
+
+    .filter-buttons {
+        gap: 6px;
+    }
+
+    .filter-btn {
+        padding: 6px 10px;
+        font-size: 0.75rem;
+    }
+
+    .problem-header {
+        flex-direction: column;
+    }
+
+    .problem-actions {
+        flex-direction: column;
+    }
+
+    .btn-small {
+        width: 100%;
+    }
+
+    .modal-content {
+        width: 95%;
+        max-height: 95vh;
+    }
+
+    .modal-footer {
+        flex-direction: column;
+    }
+
+    .modal-footer button {
+        width: 100%;
+    }
+
+    .detail-row {
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 480px) {
+    .header h1 {
+        font-size: 1.3rem;
+    }
+
+    .header .label {
+        font-size: 0.5rem;
+    }
+
+    .section-title {
+        font-size: 1.3rem;
+    }
+
+    .sbu-buttons,
+    .priority-buttons {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .problem-card {
+        padding: 15px;
+    }
+}
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div>
+                    <h1><span class="label">OPEX</span> <span class="highlight">PROBLEM REGISTER</span></h1>
+                    <p class="subtitle">Log it here. Data syncs to Google Sheet automatically.</p>
+                </div>
+                <div class="tickets-count">
+                    <div class="count" id="ticketsLogged">0</div>
+                    <div class="count-label">TICKETS LOGGED</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <section class="form-section">
+            <h2 class="section-title">NEW TICKET</h2>
+
+            <form id="problemForm">
+                <div class="form-group">
+                    <label class="form-label">SBU</label>
+                    <div class="sbu-buttons">
+                        <button type="button" class="sbu-btn" data-sbu="ACCL">ACCL</button>
+                        <button type="button" class="sbu-btn" data-sbu="APFIL">APFIL</button>
+                        <button type="button" class="sbu-btn" data-sbu="AIL">AIL</button>
+                        <button type="button" class="sbu-btn" data-sbu="AEL">AEL</button>
+                        <button type="button" class="sbu-btn" data-sbu="ALEL">ALEL</button>
+                        <button type="button" class="sbu-btn" data-sbu="AAFL">AAFL</button>
+                        <button type="button" class="sbu-btn" data-sbu="MRML">MRML</button>
+                    </div>
+                    <input type="hidden" id="selectedSBU" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">PRIORITY LEVEL</label>
+                    <div class="priority-buttons">
+                        <button type="button" class="priority-btn critical" data-priority="critical">🔴 CRITICAL</button>
+                        <button type="button" class="priority-btn warning" data-priority="warning">🟠 WARNING</button>
+                        <button type="button" class="priority-btn neutral" data-priority="neutral">🔵 NEUTRAL</button>
+                    </div>
+                    <input type="hidden" id="selectedPriority" required>
+                </div>
+
+                <div class="form-row">
+                   <div class="form-group">
+    <label class="form-label" for="yourName">YOUR NAME</label>
+
+    <select id="yourName" class="form-input" required>
+        <option value="">Select your name</option>
+        <option value="Md. Injamamul Haque">Md. Injamamul Haque</option>
+        <option value="Hasib Hossain">Hasib Hossain</option>
+        <option value="MD. Mushfiqur Rahman">MD. Mushfiqur Rahman</option>
+        <option value="MD. Soaib Hossain">MD. Soaib Hossain</option>
+        <option value="MD. RASEL AHMED">MD. RASEL AHMED</option>
+        <option value="SM Rahaman">SM Rahaman</option>
+        <option value="Md. Rayhan Rahman">Md. Rayhan Rahman</option>
+        <option value="Tareq Ahmed">Tareq Ahmed</option>
+        <option value="Arman Rashid">Arman Rashid</option>
+        <option value="Shaik Sadman Sakib">Shaik Sadman Sakib</option>
+        <option value="Md. Sajjad Bepari">Md. Sajjad Bepari</option>
+        <option value="Md. Jubayer Hossain">Md. Jubayer Hossain</option>
+        <option value="Md. Tanvir Rahman Labib">Md. Tanvir Rahman Labib</option>
+        <option value="Mahiya Watid">Mahiya Watid</option>
+        <option value="Md.Maruf Hossain">Md.Maruf Hossain</option>
+        <option value="Anoy Kumar Das">Anoy Kumar Das</option>
+    </select>
+
+</div>
+                    <div class="form-group">
+                        <label class="form-label" for="employeeId">EMPLOYEE EMAIL</label>
+                        <select id="employeeId" class="form-input" required>
+                            <option value="">Select your email</option>
+                            <option value="injamamul@akijbuildingsolutions.com">injamamul@akijbuildingsolutions.com</option>
+                            <option value="hasib04@akijessential.com">hasib04@akijessential.com</option>
+                            <option value="mushfiqur03@akijessential.com">mushfiqur03@akijessential.com</option>
+                            <option value="soaib@akijagrofeed.com">soaib@akijagrofeed.com</option>
+                            <option value="md.raselahmed@akijessential.com">md.raselahmed@akijessential.com</option>
+                            <option value="rahaman01@akijcement.com">rahaman01@akijcement.com</option>
+                            <option value="rayhan07@akijengineering.com">rayhan07@akijengineering.com</option>
+                            <option value="tareq02@akijispat.com">tareq02@akijispat.com</option>
+                            <option value="arman03@akijispat.com">arman03@akijispat.com</option>
+                            <option value="sadman01@akijcement.com">sadman01@akijcement.com</option>
+                            <option value="sajjad04@akijcement.com">sajjad04@akijcement.com</option>
+                            <option value="jubayer01@akijessentials.com">jubayer01@akijessentials.com</option>
+                            <option value="tanvir12@akijagrofeed.com">tanvir12@akijagrofeed.com</option>
+                            <option value="mahiya@akijresource.com">mahiya@akijresource.com</option>
+                            <option value="md.marufhossain@akijlightengineering.com">md.marufhossain@akijlightengineering.com</option>
+                            <option value="anoy@akijlightengineering.com">anoy@akijlightengineering.com</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="problemDate">DATE</label>
+                    <input type="date" id="problemDate" class="form-input" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="problemDesc">PROBLEM</label>
+                    <textarea id="problemDesc" class="form-input form-textarea" placeholder="Describe the problem" required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="suggestedSolution">SUGGESTED SOLUTION (optional)</label>
+                    <textarea id="suggestedSolution" class="form-input form-textarea" placeholder="Your suggested solution..."></textarea>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">SUBMIT TICKET</button>
+                <div id="formError" class="error-message"></div>
+            </form>
+        </section>
+
+        <section class="problems-section">
+            <h2 class="section-title">LOGGED PROBLEMS</h2>
+
+            <div class="filter-buttons">
+                <button class="filter-btn active" data-filter="all">ALL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="ACCL">ACCL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="APFIL">APFIL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="AIL">AIL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="AEL">AEL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="ALEL">ALEL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="AAFL">AAFL <span class="count">0</span></button>
+                <button class="filter-btn" data-filter="MRML">MRML <span class="count">0</span></button>
+            </div>
+
+            <div id="problemsList" class="problems-list">
+                <p class="empty-state">No tickets yet. First one wins.</p>
+            </div>
+        </section>
+    </div>
+
+    <div id="solutionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Manager Solution</h3>
+                <button class="modal-close" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalProblemDetail" class="problem-detail"></div>
+                <div class="form-group">
+                    <label class="form-label">MANAGER SOLUTION</label>
+                    <textarea id="managerSolution" class="form-input form-textarea" placeholder="Enter the solution here..." required></textarea>
+                </div>
+            </div>
+           <div class="modal-footer">
+
+    <button id="saveSolutionBtn"
+    class="btn-solved"
+    type="button">
+    SAVE SOLUTION
+    </button>
+
+
+    <button class="btn-cancel"
+    type="button">
+    CLOSE
+    </button>
+
+</div>
+        </div>
+    </div>
+
+    <div id="viewSolutionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Problem &amp; Solution</h3>
+                <button class="modal-close" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="viewProblemDetail" class="problem-detail"></div>
+                <div class="solution-section">
+                    <h4>Manager Solution</h4>
+                    <div id="viewSolution" class="solution-text"></div>
+                </div>
+            </div>
+           <div class="modal-footer">
+
+    <button id="meetingBtn"
+    class="btn-meeting"
+    type="button">
+    📅 CALL MEETING
+    </button>
+
+
+    <button id="viewProgressBtn"
+    class="btn-progress"
+    type="button">
+    IN PROGRESS
+    </button>
+
+
+    <button id="viewSolvedBtn"
+    class="btn-solved"
+    type="button">
+    MARK AS SOLVED
+    </button>
+
+
+    <button id="sendMailBtn"
+    class="btn-small btn-view-solution"
+    style="padding:10px 20px;"
+    type="button">
+    ✉ SEND MAIL
+    </button>
+
+
+    <button class="btn-cancel"
+    type="button">
+    CLOSE
+    </button>
+
+</div>
+        </div>
+    </div>
+
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Delete Problem</h3>
+                <button class="modal-close" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text); margin-bottom: 20px;">
+                    Are you sure you want to delete this problem? This action cannot be undone.
+                </p>
+                <div id="deleteProblemDetail" class="problem-detail"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="confirmDeleteBtn" class="btn-delete" type="button">DELETE</button>
+                <button class="btn-cancel" type="button">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="syncStatus"></div>
+
+    <script>
+const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyeJ2gIXm8_-a0PsBa9rJYd3ZJ5q1gcXMLyPCrBqxmiSxEWgifG2EuE_cbrYg1iTkAlog/exec';
+
+class ProblemManager {
+    constructor() {
+        this.problems = [];
+        this.currentFilter = 'all';
+        this.currentProblemId = null;
+        this.init();
+    }
+
+    async init() {
+        this.setupEventListeners();
+        this.setDefaultDate();
+        await this.loadProblems();
+        this.render();
+    }
+
+    setupEventListeners() {
+        document.getElementById('problemForm').addEventListener('submit', (e) => this.handleSubmit(e));
+
+        document.querySelectorAll('.sbu-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.selectSBU(e));
+        });
+
+        document.querySelectorAll('.priority-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.selectPriority(e));
+        });
+
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.setFilter(e));
+        });
+
+        document.querySelectorAll('.modal-close, .btn-cancel').forEach(btn => {
+            btn.addEventListener('click', (e) => this.closeModal(e));
+        });
+
+        document.getElementById('solutionModal').addEventListener('click', (e) => {
+            if (e.target.id === 'solutionModal') this.closeModal(e);
+        });
+
+        document.getElementById('viewSolutionModal').addEventListener('click', (e) => {
+            if (e.target.id === 'viewSolutionModal') this.closeModal(e);
+        });
+
+        document.getElementById('deleteModal').addEventListener('click', (e) => {
+            if (e.target.id === 'deleteModal') this.closeModal(e);
+        });
+
+        document.getElementById('confirmDeleteBtn').addEventListener('click', () => this.confirmDelete());
+
+        // "Add Manager Solution" modal: one button saves the solution and
+        // marks it in-progress. Use the "View Solution" modal afterward to
+        // mark it solved once confirmed.
+        document.getElementById('saveSolutionBtn').addEventListener('click', () => this.saveSolution('in-progress'));
+
+        // "View Solution" modal: change status (solution text already exists).
+        document.getElementById('viewProgressBtn').addEventListener('click', () => this.updateStatus(this.currentProblemId, 'in-progress'));
+        document.getElementById('viewSolvedBtn').addEventListener('click', () => this.updateStatus(this.currentProblemId, 'solved'));
+        document.getElementById('meetingBtn').addEventListener('click', () => this.callMeeting(this.currentProblemId));
+        document.getElementById('sendMailBtn').addEventListener('click', () => this.sendMail(this.currentProblemId));
+    }
+
+    setDefaultDate() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('problemDate').value = today;
+    }
+
+    selectSBU(e) {
+        e.preventDefault();
+        document.querySelectorAll('.sbu-btn').forEach(btn => btn.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById('selectedSBU').value = e.target.dataset.sbu;
+    }
+
+    selectPriority(e) {
+        e.preventDefault();
+        document.querySelectorAll('.priority-btn').forEach(btn => btn.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById('selectedPriority').value = e.target.dataset.priority;
+    }
+
+    async handleSubmit(e) {
+        e.preventDefault();
+
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'SUBMITTING...';
+
+        const sbu = document.getElementById('selectedSBU').value;
+        const priority = document.getElementById('selectedPriority').value;
+        const name = document.getElementById('yourName').value;
+        const employeeId = document.getElementById('employeeId').value;
+        const date = document.getElementById('problemDate').value;
+        const problem = document.getElementById('problemDesc').value;
+        const suggested = document.getElementById('suggestedSolution').value;
+
+        if (!sbu) {
+            this.showError('Please select an SBU');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'SUBMIT TICKET';
+            return;
+        }
+
+        if (!priority) {
+            this.showError('Please select a priority level');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'SUBMIT TICKET';
+            return;
+        }
+
+        const newProblem = {
+            id: Date.now().toString(),
+            sbu,
+            name,
+            employeeId,
+            date,
+            problem,
+            suggested,
+            solution: null,
+            status: 'open',
+            priority,
+            createdAt: new Date().toISOString()
+        };
+
+        try {
+            await this.sendToGoogleSheet(newProblem);
+
+            this.problems.unshift(newProblem);
+            this.resetForm();
+            this.render();
+            this.showSyncStatus('✓ Ticket submitted & synced to Google Sheet', 'success');
+        } catch (error) {
+            console.error('Error:', error);
+            this.showError('Failed to save. Check console and deployment URL.');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'SUBMIT TICKET';
+        }
+    }
+
+    async sendToGoogleSheet(problem) {
+        const payload = {
+            id: problem.id,
+            sbu: problem.sbu,
+            name: problem.name,
+            employeeId: problem.employeeId,
+            date: problem.date,
+            problem: problem.problem,
+            suggested: problem.suggested,
+            solution: problem.solution,
+            status: problem.status,
+            priority: problem.priority
+        };
+
+        const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+        return result;
+    }
+
+    resetForm() {
+        document.getElementById('problemForm').reset();
+        document.querySelectorAll('.sbu-btn, .priority-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('selectedSBU').value = '';
+        document.getElementById('selectedPriority').value = '';
+        document.getElementById('formError').classList.remove('show');
+        this.setDefaultDate();
+    }
+
+    showError(message) {
+        const errorEl = document.getElementById('formError');
+        errorEl.textContent = message;
+        errorEl.classList.add('show');
+        setTimeout(() => errorEl.classList.remove('show'), 3000);
+    }
+
+    showSyncStatus(message, type = 'success') {
+        const indicator = document.getElementById('syncStatus');
+        indicator.textContent = message;
+        indicator.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        indicator.style.display = 'block';
+
+        if (type === 'success') {
+            setTimeout(() => indicator.style.display = 'none', 3000);
+        }
+    }
+
+    setFilter(e) {
+        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        e.target.closest('.filter-btn').classList.add('active');
+        this.currentFilter = e.target.closest('.filter-btn').dataset.filter;
+        this.render();
+    }
+
+    openSolutionModal(problemId) {
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        this.currentProblemId = problemId;
+
+        const modal = document.getElementById('solutionModal');
+        const detail = document.getElementById('modalProblemDetail');
+
+        detail.innerHTML = `
+            <div class="detail-row">
+                <span class="detail-label">ID:</span>
+                <span class="detail-value">${problem.id}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">SBU:</span>
+                <span class="detail-value">${problem.sbu}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Priority:</span>
+                <span class="detail-value"><span class="priority-badge ${problem.priority}">${problem.priority.toUpperCase()}</span></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Reporter:</span>
+                <span class="detail-value">${problem.name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Email:</span>
+                <span class="detail-value">${problem.employeeId}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Date:</span>
+                <span class="detail-value">${new Date(problem.date).toLocaleDateString()}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Problem:</span>
+                <span class="detail-value">${problem.problem}</span>
+            </div>
+        `;
+
+        document.getElementById('managerSolution').value = '';
+
+        modal.classList.add('show');
+    }
+
+    // Saves the manager's solution text and sets the resulting status in one step.
+    async saveSolution(status) {
+        const problemId = this.currentProblemId;
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        const solution = document.getElementById('managerSolution').value.trim();
+
+        if (!solution) {
+            alert('Enter solution');
+            return;
+        }
+
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'updateSolution',
+                    id: String(problemId),
+                    solution: solution,
+                    status: status
+                })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown error');
+            }
+
+            problem.solution = solution;
+            problem.status = status;
+
+            this.closeModal();
+            this.render();
+            this.showSyncStatus(`✓ Solution saved — status: ${status}`, 'success');
+
+        } catch (error) {
+            console.error('Solution error:', error);
+            alert('Solution save failed');
+        }
+    }
+
+    openViewSolutionModal(problemId) {
+        const problem = this.problems.find(p => p.id == problemId);
+
+        if (!problem || !problem.solution || !problem.solution.trim()) {
+            return;
+        }
+
+        this.currentProblemId = problemId;
+
+        const modal = document.getElementById('viewSolutionModal');
+        const detail = document.getElementById('viewProblemDetail');
+        const solutionDiv = document.getElementById('viewSolution');
+
+        detail.innerHTML = `
+            <div class="detail-row">
+                <span class="detail-label">ID:</span>
+                <span class="detail-value">${problem.id}</span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">SBU:</span>
+                <span class="detail-value">${problem.sbu}</span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Priority:</span>
+                <span class="detail-value">
+                    <span class="priority-badge ${problem.priority}">
+                        ${problem.priority.toUpperCase()}
+                    </span>
+                </span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Reporter:</span>
+                <span class="detail-value">${problem.name}</span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Email:</span>
+                <span class="detail-value">${problem.employeeId}</span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Date:</span>
+                <span class="detail-value">${problem.date}</span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value">
+                    <span class="status-badge ${problem.status}">
+                        ${problem.status}
+                    </span>
+                </span>
+            </div>
+
+            <div class="detail-row">
+                <span class="detail-label">Problem:</span>
+                <span class="detail-value">${problem.problem}</span>
+            </div>
+        `;
+
+        solutionDiv.textContent = problem.solution;
+
+        modal.classList.add('show');
+    }
+
+    // Changes status only (solution text is left as-is). Used from the "View Solution" modal.
+    async updateStatus(problemId, status) {
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'updateSolution',
+                    id: String(problemId),
+                    solution: problem.solution || '',
+                    status: status
+                })
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown error');
+            }
+
+            problem.status = status;
+            this.closeModal();
+            this.render();
+            this.showSyncStatus(`✓ Status updated: ${status}`, 'success');
+
+        } catch (error) {
+            console.error('Status update error:', error);
+            alert('Status update failed');
+        }
+    }
+
+    callMeeting(problemId) {
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        const email = 'sanjeed@akijshipping.com';
+
+        // Open the tab immediately, still inside the click handler, so the
+        // browser doesn't treat it as an unrequested popup.
+        const meetingTab = window.open('', '_blank');
+
+        const title = `Problem Discussion Meeting - ${problem.id}`;
+
+        const description =
+`Problem ID: ${problem.id}
+
+SBU: ${problem.sbu}
+
+Reporter: ${problem.name}
+
+Email: ${problem.employeeId}
+
+Problem:
+${problem.problem}
+
+Manager Solution:
+${problem.solution || '(none yet)'}
+`;
+
+        const start = new Date();
+        const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour meeting
+
+        const formatGoogleDate = (date) => date.toISOString().replace(/-|:|\.\d+/g, '');
+
+        const calendarURL =
+            'https://calendar.google.com/calendar/render'
+            + '?action=TEMPLATE'
+            + '&text=' + encodeURIComponent(title)
+            + '&details=' + encodeURIComponent(description)
+            + '&add=' + encodeURIComponent(email)
+            + '&dates=' + formatGoogleDate(start) + '/' + formatGoogleDate(end);
+
+        if (meetingTab) {
+            // Tab opened fine — navigate it to the real Calendar URL.
+            meetingTab.location.href = calendarURL;
+        } else {
+            // Browser blocked window.open() entirely (e.g. popups disabled) —
+            // fall back to navigating the current tab so the user still gets there.
+            window.location.href = calendarURL;
+        }
+    }
+
+    async sendMail(problemId) {
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        if (!problem.employeeId) {
+            alert('This ticket has no email on file.');
+            return;
+        }
+
+        const btn = document.getElementById('sendMailBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'SENDING...';
+
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'sendMail',
+                    id: String(problemId)
+                })
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown error');
+            }
+
+            this.showSyncStatus(`✓ Mail sent to ${problem.employeeId}`, 'success');
+        } catch (error) {
+            console.error('Send mail error:', error);
+            alert('Failed to send mail.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+
+    openDeleteModal(problemId) {
+        const problem = this.problems.find(p => p.id == problemId);
+        if (!problem) return;
+
+        const modal = document.getElementById('deleteModal');
+        const detail = document.getElementById('deleteProblemDetail');
+
+        detail.innerHTML = `
+            <div class="detail-row">
+                <span class="detail-label">ID:</span>
+                <span class="detail-value">${problem.id}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">SBU:</span>
+                <span class="detail-value">${problem.sbu}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Reporter:</span>
+                <span class="detail-value">${problem.name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Email:</span>
+                <span class="detail-value">${problem.employeeId}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Problem:</span>
+                <span class="detail-value">${problem.problem.substring(0, 100)}${problem.problem.length > 100 ? '...' : ''}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Date:</span>
+                <span class="detail-value">${new Date(problem.date).toLocaleDateString()}</span>
+            </div>
+        `;
+
+        this.currentProblemId = problemId;
+        modal.classList.add('show');
+    }
+
+    async confirmDelete() {
+        if (!this.currentProblemId) return;
+        const problemId = this.currentProblemId;
+
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'deleteProblem', id: String(problemId) })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown error');
+            }
+        } catch (error) {
+            // If your Apps Script doesn't yet handle a "deleteProblem" action, this row
+            // will only be removed locally and will reappear after the next reload.
+            console.error('Delete sync failed (add a "deleteProblem" action to your Apps Script):', error);
+        }
+
+        this.problems = this.problems.filter(p => p.id !== problemId);
+        this.closeModal();
+        this.render();
+        this.showSyncStatus('✓ Problem hidden', 'success');
+    }
+
+    closeModal(e) {
+        if (e) e.preventDefault();
+        document.getElementById('solutionModal').classList.remove('show');
+        document.getElementById('viewSolutionModal').classList.remove('show');
+        document.getElementById('deleteModal').classList.remove('show');
+    }
+
+    getFilteredProblems() {
+        if (this.currentFilter === 'all') {
+            return this.problems;
+        }
+        return this.problems.filter(p => p.sbu === this.currentFilter);
+    }
+
+    render() {
+        this.updateCounts();
+        this.renderProblems();
+    }
+
+    updateCounts() {
+        document.getElementById('ticketsLogged').textContent = this.problems.length;
+
+        const sbus = ['all', 'ACCL', 'APFIL', 'AIL', 'AEL', 'ALEL', 'AAFL', 'MRML'];
+        sbus.forEach(sbu => {
+            const count = sbu === 'all' ? this.problems.length : this.problems.filter(p => p.sbu === sbu).length;
+            const btn = document.querySelector(`[data-filter="${sbu}"]`);
+            if (btn) {
+                btn.querySelector('.count').textContent = count;
+            }
+        });
+    }
+
+    renderProblems() {
+        const container = document.getElementById('problemsList');
+        const filtered = this.getFilteredProblems();
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<p class="empty-state">No tickets for this filter.</p>';
+            return;
+        }
+
+        container.innerHTML = filtered.map(problem => `
+            <div class="problem-card ${problem.status}">
+                <div class="problem-header">
+                    <div class="problem-meta">
+                        <span class="problem-sbu">${problem.sbu}</span>
+                        <span class="employee-id-badge">${problem.employeeId}</span>
+                        <span class="priority-badge ${problem.priority}">${problem.priority}</span>
+                        <div class="problem-title">${problem.problem.substring(0, 50)}${problem.problem.length > 50 ? '...' : ''}</div>
+                        <div class="problem-meta-info">
+                            <span>${problem.name}</span>
+                            <span>${new Date(problem.date).toLocaleDateString()}</span>
+                            <span class="status-badge ${problem.status}">${problem.status}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="problem-description">${problem.problem}</div>
+
+                ${problem.suggested ? `
+                    <div class="problem-suggested">
+                        <strong>Suggested Solution:</strong> ${problem.suggested}
+                    </div>
+                ` : ''}
+
+                ${problem.solution ? `
+                    <div style="background: #f0fdf4; padding: 10px; border-radius: 4px; margin-bottom: 12px; border-left: 3px solid #10b981;">
+                        <span class="solution-badge">✓ Solution Available</span>
+                    </div>
+                ` : ''}
+
+                <div class="problem-actions">
+                   ${(!problem.solution || !problem.solution.trim()) ? `
+<button class="btn-small btn-add-solution"
+type="button"
+onclick="manager.openSolutionModal('${problem.id}')">
++ Add Solution
+</button>
+` : ''}
+                    ${(problem.solution && problem.solution.trim()) ? `
+<button class="btn-small btn-view-solution"
+type="button"
+onclick="manager.openViewSolutionModal('${problem.id}')">
+View Solution
+</button>
+` : ''}
+                    <button class="btn-small btn-delete-small" type="button" onclick="manager.openDeleteModal('${problem.id}')">🗑️ Delete</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async loadProblems() {
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL);
+            const data = await response.json();
+            this.problems = Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.error('Google Sheet loading failed:', error);
+            this.showSyncStatus('⚠ Could not load data from Google Sheet', 'error');
+            this.problems = [];
+        }
+    }
+}
+
+const manager = new ProblemManager();
+    %%ENDSCRIPT%%>
 </body>
 </html>
 </script>
