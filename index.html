@@ -6,16 +6,50 @@
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family: -apple-system, Arial, sans-serif; background:#0f1115; height:100vh; display:flex; flex-direction:column; }
-  .topbar { display:flex; align-items:center; justify-content:center; padding:14px 16px; background:#181b21; border-bottom:1px solid #262a33; }
+  .topbar { display:flex; align-items:center; justify-content:center; position:relative; padding:14px 16px; background:#181b21; border-bottom:1px solid #262a33; }
   .navwrap { display:flex; gap:6px; background:#1c2029; border-radius:999px; padding:6px; flex-wrap:wrap; }
   .navbtn { appearance:none; border:none; background:transparent; color:#c7ccd6; font-size:14px; font-weight:600; padding:10px 22px; border-radius:999px; cursor:pointer; transition: background .15s, color .15s; white-space:nowrap; }
   .navbtn:hover { color:#fff; }
   .navbtn.active { background:#e8a13b; color:#1a1305; }
   .frame-wrap { flex:1; position:relative; background:#0f1115; }
   iframe { position:absolute; inset:0; width:100%; height:100%; border:none; background:#fff; }
+  .login-gate { position:fixed; inset:0; background:#0f1115; display:flex; align-items:center; justify-content:center; z-index:2000; }
+  .login-gate.hidden { display:none; }
+  .login-box { background:#181b21; border:1px solid #262a33; border-radius:12px; padding:36px 32px; width:340px; max-width:90vw; text-align:center; }
+  .login-logo { color:#fff; font-size:1.3rem; font-weight:700; margin-bottom:6px; }
+  .login-logo .accent { color:#e8a13b; }
+  .login-sub { color:#9aa1ad; font-size:0.85rem; margin-bottom:20px; line-height:1.4; }
+  .login-input { width:100%; padding:10px 14px; border-radius:8px; border:1px solid #2c313c; background:#0f1115; color:#fff; margin-bottom:10px; font-size:0.95rem; box-sizing:border-box; }
+  .login-input:focus { outline:none; border-color:#e8a13b; }
+  .login-error { color:#ef4444; font-size:0.8rem; min-height:16px; margin-bottom:6px; }
+  .login-btn { width:100%; padding:11px; border-radius:8px; border:none; font-weight:700; font-size:0.9rem; cursor:pointer; margin-top:8px; }
+  .login-btn.primary { background:#e8a13b; color:#1a1305; }
+  .login-btn.primary:hover { background:#f0af52; }
+  .login-btn.secondary { background:transparent; color:#c7ccd6; border:1px solid #2c313c; }
+  .login-btn.secondary:hover { border-color:#e8a13b; color:#fff; }
+  .role-badge { position:absolute; right:16px; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:8px; font-size:0.75rem; color:#9aa1ad; }
+  .role-badge .dot2 { width:8px; height:8px; border-radius:50%; }
+  .role-badge.admin .dot2 { background:#10b981; }
+  .role-badge.viewer .dot2 { background:#f59e0b; }
+  .role-badge button { background:none; border:1px solid #2c313c; color:#c7ccd6; border-radius:999px; padding:4px 12px; font-size:0.7rem; cursor:pointer; }
+  .role-badge button:hover { border-color:#e8a13b; color:#fff; }
+  @media (max-width: 640px) {
+    .role-badge { position:static; transform:none; justify-content:center; margin-top:8px; }
+    .topbar { flex-wrap:wrap; }
+  }
 </style>
 </head>
 <body>
+  <div id="loginGate" class="login-gate">
+    <div class="login-box">
+      <div class="login-logo">AROPEX <span class="accent">Command Center</span></div>
+      <p class="login-sub">Sign in as admin for full access, or continue to the read-only Daily Pacing Dashboard.</p>
+      <input type="password" id="adminPasswordInput" class="login-input" placeholder="Admin password" autocomplete="off">
+      <div id="loginError" class="login-error"></div>
+      <button id="adminSignInBtn" class="login-btn primary" type="button">Sign in as Admin</button>
+      <button id="viewerContinueBtn" class="login-btn secondary" type="button">Continue as Viewer</button>
+    </div>
+  </div>
   <div class="topbar">
     <div class="navwrap">
       <button class="navbtn active" data-target="5s">5S Audit</button>
@@ -26,6 +60,11 @@
 <button class="navbtn" data-target="qcp">QCP Audit</button>
 <button class="navbtn" data-target="process">Process Standardization</button>
 <button class="navbtn" data-target="problems">Problem Solving Dashboard</button>
+    </div>
+    <div id="roleBadge" class="role-badge">
+      <span class="dot2"></span>
+      <span id="roleLabel">—</span>
+      <button id="switchRoleBtn" type="button">Switch</button>
     </div>
   </div>
   <div class="frame-wrap">
@@ -7296,9 +7335,69 @@ const manager = new ProblemManager();
     const iframe = document.getElementById('viewer');
     const buttons = document.querySelectorAll('.navbtn');
 
+    const ADMIN_PASSWORD = 'OPEX@26';
+    const loginGate = document.getElementById('loginGate');
+    const adminPasswordInput = document.getElementById('adminPasswordInput');
+    const loginError = document.getElementById('loginError');
+    const roleBadge = document.getElementById('roleBadge');
+    const roleLabel = document.getElementById('roleLabel');
+    const switchRoleBtn = document.getElementById('switchRoleBtn');
+
+    let currentRole = sessionStorage.getItem('hubRole');
+
+    // Injected into every tab's document when the signed-in role is not
+    // 'admin'. Hides any button/submit input whose id/class/text matches a
+    // known mutating-action keyword, blocks form submission as a backstop,
+    // and re-sweeps on DOM changes since several tabs render their button
+    // lists asynchronously (after a Supabase/Sheets fetch).
+    const VIEWER_GUARD_BODY = `
+(function(){
+  var HIDE_KEYWORDS = ['submit','save','del','add','edit','regist','finaliz','complet','confirm','accept','reject','hide','unhide','progress','solved','meeting','sendmail','log','toggle','remove'];
+  function isActionEl(el){
+    var s = ((el.id||'') + ' ' + (el.className||'') + ' ' + (el.textContent||'')).toLowerCase();
+    for (var i=0;i<HIDE_KEYWORDS.length;i++){
+      if (s.indexOf(HIDE_KEYWORDS[i]) !== -1) return true;
+    }
+    return false;
+  }
+  function sweep(){
+    document.querySelectorAll('button, input[type="submit"]').forEach(function(el){
+      if (isActionEl(el)) el.style.setProperty('display','none','important');
+    });
+  }
+  function guardForms(){
+    document.querySelectorAll('form').forEach(function(f){
+      if (f.dataset.viewGuarded) return;
+      f.dataset.viewGuarded = '1';
+      f.addEventListener('submit', function(e){ e.preventDefault(); e.stopPropagation(); });
+    });
+  }
+  function run(){ sweep(); guardForms(); }
+  document.addEventListener('DOMContentLoaded', function(){
+    run();
+    var scheduled = false;
+    var mo = new MutationObserver(function(){
+      if (scheduled) return;
+      scheduled = true;
+      setTimeout(function(){ scheduled = false; run(); }, 50);
+    });
+    mo.observe(document.body, {childList:true, subtree:true});
+
+    var banner = document.createElement('div');
+    banner.textContent = 'VIEW ONLY MODE — sign in as admin on the hub to make changes';
+    banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1f2937;color:#fbbf24;font:bold 12px -apple-system,Arial,sans-serif;text-align:center;padding:6px;z-index:99999;letter-spacing:.5px;';
+    document.body.appendChild(banner);
+  });
+})();
+`;
+    const VIEWER_GUARD = '<script>' + VIEWER_GUARD_BODY + '<' + '/script>';
+
     function loadTab(key) {
       const tpl = document.getElementById('tpl-' + key);
-      const restored = tpl.textContent.split('%%ENDSCRIPT%%').join('</script');
+      let restored = tpl.textContent.split('%%ENDSCRIPT%%').join('</script');
+      if (currentRole !== 'admin') {
+        restored = restored.replace('</body>', VIEWER_GUARD + '</body>');
+      }
       iframe.srcdoc = restored;
       buttons.forEach(b => b.classList.toggle('active', b.dataset.target === key));
     }
@@ -7307,7 +7406,52 @@ const manager = new ProblemManager();
       btn.addEventListener('click', () => loadTab(btn.dataset.target));
     });
 
-    loadTab('5s');
+    function updateRoleUI(){
+      if (currentRole === 'admin') {
+        roleBadge.className = 'role-badge admin';
+        roleLabel.textContent = 'Admin';
+      } else {
+        roleBadge.className = 'role-badge viewer';
+        roleLabel.textContent = 'Viewer (read-only)';
+      }
+    }
+
+    function setRole(role) {
+      currentRole = role;
+      sessionStorage.setItem('hubRole', role);
+      updateRoleUI();
+      loginGate.classList.add('hidden');
+      const active = document.querySelector('.navbtn.active');
+      loadTab(active ? active.dataset.target : '5s');
+    }
+
+    document.getElementById('adminSignInBtn').addEventListener('click', function(){
+      if (adminPasswordInput.value === ADMIN_PASSWORD) {
+        loginError.textContent = '';
+        setRole('admin');
+      } else {
+        loginError.textContent = 'Incorrect password.';
+      }
+    });
+    adminPasswordInput.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') document.getElementById('adminSignInBtn').click();
+    });
+    document.getElementById('viewerContinueBtn').addEventListener('click', function(){
+      window.location.href = 'https://sanjeed-ferhan.github.io/ACCL-Supabase-Dashboard/';
+    });
+    switchRoleBtn.addEventListener('click', function(){
+      sessionStorage.removeItem('hubRole');
+      currentRole = null;
+      adminPasswordInput.value = '';
+      loginError.textContent = '';
+      loginGate.classList.remove('hidden');
+    });
+
+    if (currentRole === 'admin' || currentRole === 'viewer') {
+      updateRoleUI();
+      loginGate.classList.add('hidden');
+      loadTab('5s');
+    }
   </script>
 </body>
 </html>
